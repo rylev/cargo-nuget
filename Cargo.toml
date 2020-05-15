@@ -13,6 +13,8 @@ async-std = "1.5"
 surf = "1.0"
 futures = "0.3"
 thiserror = "1.0"
+anyhow = "1.0"
+zip = "0.5"
 
 [package.metadata.android]
 foo = "bar"
