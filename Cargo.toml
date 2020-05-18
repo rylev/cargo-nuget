@@ -16,8 +16,5 @@ thiserror = "1.0"
 anyhow = "1.0"
 zip = "0.5"
 
-[package.metadata.android]
-foo = "bar"
-
 [package.metadata.nuget_dependencies]
 "Win2D.uwp" = "1.25.0"

@@ -8,18 +8,21 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let opt = Opt::from_args();
-    match opt.subcommand {
+    let Opt::Nuget { subcommand } = Opt::from_args();
+    match subcommand {
         Subcommand::Install(i) => i.perform().unwrap(),
     }
 }
 
 /// A utility for interacting with nuget packages
 #[derive(StructOpt, Debug)]
-#[structopt(name = "nuget")]
-struct Opt {
-    #[structopt(subcommand)]
-    pub subcommand: Subcommand,
+#[structopt(bin_name = "cargo")]
+enum Opt {
+    #[structopt(name = "nuget")]
+    Nuget {
+        #[structopt(subcommand)]
+        subcommand: Subcommand,
+    },
 }
 
 #[derive(Debug, StructOpt)]
@@ -49,7 +52,7 @@ impl Install {
         let deps = get_deps(manifest)?;
         let downloaded_deps = download_dependencies(deps)?;
         for dep in downloaded_deps {
-            let dep_directory = PathBuf::new()
+            let dep_directory = workspace_root()
                 .join("target")
                 .join("nuget")
                 .join(&dep.dependency.name);
@@ -66,6 +69,11 @@ impl Install {
 
         Ok(())
     }
+}
+
+fn workspace_root() -> PathBuf {
+    // TODO: improve this
+    PathBuf::new()
 }
 
 fn get_deps(manifest: Manifest) -> Result<Vec<Dependency>, Error> {
@@ -247,6 +255,20 @@ impl Dll {
     fn write(&self, dir: &Path) -> std::io::Result<()> {
         let path = dir.join(&self.name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, &self.contents)
+        if !path.exists() {
+            std::fs::write(&path, &self.contents).unwrap();
+        }
+        for profile in &["debug", "release"] {
+            let profile_path = workspace_root().join("target").join(profile);
+            std::fs::create_dir_all(&profile_path).unwrap();
+            let arch = self.name.parent().unwrap();
+            let dll_path = profile_path.join(&self.name.strip_prefix(&arch).unwrap());
+            if arch.as_os_str() == "win10-x64" && std::fs::read_link(&dll_path).is_err() {
+                println!("{} {:?}", dll_path.display(), dll_path.exists());
+                std::os::windows::fs::symlink_file(&path, dll_path).unwrap();
+            }
+        }
+
+        Ok(())
     }
 }
