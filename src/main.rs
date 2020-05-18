@@ -254,21 +254,33 @@ struct Dll {
 impl Dll {
     fn write(&self, dir: &Path) -> std::io::Result<()> {
         let path = dir.join(&self.name);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+
         if !path.exists() {
-            std::fs::write(&path, &self.contents).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(&path, &self.contents)?;
         }
         for profile in &["debug", "release"] {
             let profile_path = workspace_root().join("target").join(profile);
-            std::fs::create_dir_all(&profile_path).unwrap();
+            std::fs::create_dir_all(&profile_path)?;
             let arch = self.name.parent().unwrap();
             let dll_path = profile_path.join(&self.name.strip_prefix(&arch).unwrap());
-            if arch.as_os_str() == "win10-x64" && std::fs::read_link(&dll_path).is_err() {
-                println!("{} {:?}", dll_path.display(), dll_path.exists());
-                std::os::windows::fs::symlink_file(&path, dll_path).unwrap();
+            if arch.as_os_str() == ARCH && std::fs::read_link(&dll_path).is_err() {
+                std::os::windows::fs::symlink_file(&path, dll_path)?;
             }
         }
 
         Ok(())
     }
 }
+
+#[cfg(target_arch = "x86_64")]
+const ARCH: &str = "win10-x64";
+
+#[cfg(target_arch = "x86")]
+const ARCH: &str = "win10-x86";
+
+#[cfg(target_arch = "arm")]
+const ARCH: &str = "win10-arm";
+
+#[cfg(target_arch = "aarch64")]
+const ARCH: &str = "win10-arm64";
