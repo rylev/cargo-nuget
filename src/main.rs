@@ -49,15 +49,18 @@ impl Install {
         let deps = get_deps(manifest)?;
         let downloaded_deps = download_dependencies(deps)?;
         for dep in downloaded_deps {
-            let winmds = dep.winmds()?;
             let dep_directory = PathBuf::new()
                 .join("target")
                 .join("nuget")
-                .join(dep.dependency.name);
+                .join(&dep.dependency.name);
             // create the dependency directory
             std::fs::create_dir_all(&dep_directory).unwrap();
-            for winmd in winmds {
+            for winmd in dep.winmds() {
                 winmd.write(&dep_directory).unwrap();
+            }
+
+            for dll in dep.dlls() {
+                dll.write(&dep_directory).unwrap();
             }
         }
 
@@ -148,14 +151,31 @@ impl Dependency {
 
 struct DownloadedDependency {
     dependency: Dependency,
-    bytes: Vec<u8>,
+    contents: (Vec<Winmd>, Vec<Dll>),
 }
 
 impl DownloadedDependency {
-    fn winmds(&self) -> Result<Vec<Winmd>, Error> {
-        let reader = std::io::Cursor::new(&self.bytes);
+    fn new(dependency: Dependency, bytes: Vec<u8>) -> Result<Self, Error> {
+        let contents = Self::read_contents(&bytes)?;
+        Ok(Self {
+            dependency,
+            contents,
+        })
+    }
+
+    fn winmds(&self) -> &[Winmd] {
+        &self.contents.0
+    }
+
+    fn dlls(&self) -> &[Dll] {
+        &self.contents.1
+    }
+
+    fn read_contents(zip: &[u8]) -> Result<(Vec<Winmd>, Vec<Dll>), Error> {
+        let reader = std::io::Cursor::new(zip);
         let mut zip = zip::ZipArchive::new(reader).map_err(|e| Error::Other(Box::new(e)))?;
         let mut winmds = Vec::new();
+        let mut dlls = Vec::new();
         for i in 0..zip.len() {
             let mut file = zip.by_index(i).unwrap();
             let path = file.sanitized_name();
@@ -173,10 +193,26 @@ impl DownloadedDependency {
                     }
                     winmds.push(Winmd { name, contents });
                 }
+                Some(e) if e == "dll" && path.starts_with("runtimes") => {
+                    let name: PathBuf = path
+                        .components()
+                        .filter(|c| match c {
+                            std::path::Component::Normal(p) => *p != "native" && *p != "runtimes",
+                            _ => panic!("Unexpected component"),
+                        })
+                        .collect();
+                    let mut contents = Vec::with_capacity(file.size() as usize);
+
+                    if let Err(e) = file.read_to_end(&mut contents) {
+                        eprintln!("Could not read dll: {:?}", e);
+                        continue;
+                    }
+                    dlls.push(Dll { name, contents });
+                }
                 _ => {}
             }
         }
-        Ok(winmds)
+        Ok((winmds, dlls))
     }
 }
 
@@ -184,10 +220,7 @@ fn download_dependencies(deps: Vec<Dependency>) -> Result<Vec<DownloadedDependen
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let results = deps.into_iter().map(|dep| async move {
             let bytes = dep.download().await?;
-            Ok(DownloadedDependency {
-                dependency: dep,
-                bytes,
-            })
+            Ok(DownloadedDependency::new(dep, bytes)?)
         });
 
         futures::future::try_join_all(results).await
@@ -202,5 +235,18 @@ struct Winmd {
 impl Winmd {
     fn write(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::write(dir.join(&self.name), &self.contents)
+    }
+}
+
+struct Dll {
+    name: PathBuf,
+    contents: Vec<u8>,
+}
+
+impl Dll {
+    fn write(&self, dir: &Path) -> std::io::Result<()> {
+        let path = dir.join(&self.name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &self.contents)
     }
 }
