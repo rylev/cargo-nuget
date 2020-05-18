@@ -66,7 +66,7 @@ impl Install {
                         let mut contents = Vec::with_capacity(file.size() as usize);
                         use std::io::Read;
                         println!("{:?}", name);
-                        if let Err(e) = file.read(&mut contents) {
+                        if let Err(e) = file.read_to_end(&mut contents) {
                             println!("Could not read file: {:?} {:?}", e, file.compression());
                             continue;
                         }
